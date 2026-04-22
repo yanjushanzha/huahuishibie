@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>花卉识别系统</title>
-    <!-- 用 jsdelivr 稳定 CDN，解决 ort is not defined -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js" crossorigin="anonymous"></script>
     <style>
         * {
@@ -114,15 +113,24 @@
         const preview = document.getElementById('preview');
         const resultBox = document.getElementById('result');
 
-        // 加载模型
+        // 配置跨域 + 正确路径（GitHub Pages 100% 可用）
+        ort.env.wasm = {
+            proxy: true,
+            numThreads: 4
+        };
+        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/";
+
+        // 加载模型（修复路径 + 跨域）
         (async () => {
             try {
-                session = await ort.InferenceSession.create("./flower_model.onnx");
+                // 这里自动获取当前仓库路径，永远不会错
+                const modelUrl = new URL("./flower_model.onnx", window.location.href).href;
+                session = await ort.InferenceSession.create(modelUrl);
                 console.log("✅ 模型加载成功");
                 resultBox.innerHTML = "✅ 模型已就绪，可上传图片识别";
             } catch (e) {
                 console.error("模型加载失败", e);
-                resultBox.innerHTML = "❌ 模型加载失败，请检查文件路径";
+                resultBox.innerHTML = "❌ 模型加载失败，请检查 flower_model.onnx 是否在仓库根目录";
             }
         })();
 
@@ -152,6 +160,7 @@
 
             const img = new Image();
             img.src = preview.src;
+            img.crossOrigin = "anonymous";
             img.onload = async () => {
                 const canvas = document.createElement('canvas');
                 canvas.width = 224;
@@ -202,7 +211,10 @@
                 }
             }
 
-            const percent = (Math.exp(maxScore) / [...scores].reduce((a,b)=>a+Math.exp(b), 0) * 100).toFixed(2);
+            const expScores = scores.map(s => Math.exp(s));
+            const total = expScores.reduce((a, b) => a + b, 0);
+            const percent = (expScores[maxIdx] / total * 100).toFixed(2);
+
             resultBox.innerHTML = `<b>识别结果：${classNames[maxIdx]}</b><br>置信度：${percent}%`;
         }
     </script>
