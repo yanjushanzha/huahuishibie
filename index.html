@@ -2,70 +2,232 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>花卉识别</title>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>花卉识别系统</title>
+    <!-- 改用 jsdelivr 稳定 CDN，避免拦截 -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js" crossorigin="anonymous"></script>
     <style>
-        body{padding:30px;display:flex;flex-direction:column;align-items:center}
-        .img-box{width:100%;height:350px;border:2px dashed #ccc;margin:20px 0;display:flex;align-items:center;justify-content:center}
-        #preview{max-height:100%;display:none}
-        .btn{padding:10px 20px;margin:5px}
-        .result{margin-top:20px;font-size:18px}
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+
+        body {
+            background-color: #f7f9fc;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 700px;
+            width: 100%;
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 26px;
+            color: #2c3e50;
+            margin-bottom: 25px;
+        }
+
+        .img-box {
+            width: 100%;
+            height: 350px;
+            border: 2px dashed #bdc3c7;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        #preview {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: none;
+        }
+
+        .btn {
+            padding: 12px 28px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background-color: #3498db;
+            color: white;
+            cursor: pointer;
+            margin: 8px;
+            transition: 0.2s;
+        }
+
+        .btn:hover {
+            background-color: #2980b9;
+        }
+
+        .result {
+            margin-top: 25px;
+            text-align: left;
+            font-size: 16px;
+            line-height: 1.7;
+        }
+
+        .result b {
+            color: #e74c3c;
+            font-size: 18px;
+        }
     </style>
 </head>
+
 <body>
-    <h1>花卉识别系统</h1>
-    <div class="img-box"><img id="preview"></div>
-    <input type="file" id="upload" class="btn" accept="image/*">
-    <button class="btn" onclick="predict()">开始识别</button>
-    <div class="result" id="result"></div>
+    <div class="container">
+        <h1>花卉识别系统</h1>
+        <div class="img-box">
+            <img id="preview" alt="预览图">
+        </div>
 
-<script>
-const classNames = ["芙蓉葵","鸡蛋花","金鱼草","蒲公英","牵牛花","石竹","仙客来","一品红","硬叶兜兰","玉兰","月季","白晶菊","波斯菊","大丽花","帝王花","杜鹃","非洲菊","风信子","荷花","鹤望兰","凌霄花","马蹄莲","三角梅","三色堇","水仙","睡莲","向日葵","银莲花","虞美人","鸢尾"];
-let session;
+        <input type="file" id="upload" accept="image/*" class="btn" style="background-color:#95a5a6">
+        <button class="btn" onclick="predict()">开始识别</button>
 
-ort.env.wasm = { wasmPaths:"https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/", proxy:true, numThreads:1 };
+        <div class="result" id="result"></div>
+    </div>
 
-(async ()=>{
-    try {
-        session = await ort.InferenceSession.create("https://yanjushanzha.github.io/huahuishibie/flower_model.onnx");
-        document.getElementById("result").innerText = "✅ 模型加载成功！";
-    }catch(e){
-        document.getElementById("result").innerText = "❌ 模型加载失败："+e.message;
-    }
-})();
+    <script>
+        const classNames = [
+            "芙蓉葵","鸡蛋花","金鱼草","蒲公英","牵牛花",
+            "石竹","仙客来","一品红","硬叶兜兰","玉兰",
+            "月季","白晶菊","波斯菊","大丽花","帝王花",
+            "杜鹃","非洲菊","风信子","荷花","鹤望兰",
+            "凌霄花","马蹄莲","三角梅","三色堇","水仙",
+            "睡莲","向日葵","银莲花","虞美人","鸢尾"
+        ];
 
-document.getElementById("upload").onchange = e=>{
-    const url = URL.createObjectURL(e.target.files[0]);
-    document.getElementById("preview").src = url;
-    document.getElementById("preview").style.display = "block";
-};
+        let session;
+        const preview = document.getElementById('preview');
+        const resultBox = document.getElementById('result');
 
-async function predict(){
-    const img = new Image();
-    img.src = document.getElementById("preview").src;
-    img.onload = async ()=>{
-        const canvas = document.createElement("canvas");
-        canvas.width=224; canvas.height=224;
-        const ctx=canvas.getContext("2d");
-        ctx.drawImage(img,0,0,224,224);
-        const data=ctx.getImageData(0,0,224,224).data;
+        // --------------------------
+        // 关键修复：禁用本地存储，避免被浏览器拦截
+        // --------------------------
+        ort.env.wasm = {
+            wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/",
+            proxy: true,
+            numThreads: 1,
+            // 禁用本地存储相关功能
+            useWebAssemblyThreads: false,
+            enableCpuMemPattern: false
+        };
+        ort.env.logLevel = "error"; // 只显示错误，减少警告干扰
 
-        const arr=new Float32Array(3*224*224);
-        const mean=[0.485,0.456,0.406],std=[0.229,0.224,0.225];
-        for(let i=0;i<224*224;i++){
-            arr[i]=(data[i*4]/255-mean[0])/std[0];
-            arr[i+224*224]=(data[i*4+1]/255-mean[1])/std[1];
-            arr[i+2*224*224]=(data[i*4+2]/255-mean[2])/std[2];
+        // --------------------------
+        // 加载模型（带重试机制）
+        // --------------------------
+        (async () => {
+            try {
+                // 改用 jsdelivr CDN 地址，绕过 GitHub Pages 分发问题
+                const modelUrl = "https://cdn.jsdelivr.net/gh/yanjushanzha/huahuishibie@main/flower_web.onnx";
+                console.log("正在加载模型：", modelUrl);
+                session = await ort.InferenceSession.create(modelUrl);
+                console.log("✅ 模型加载成功");
+                resultBox.innerHTML = "✅ 模型已就绪，可上传图片识别";
+            } catch (e) {
+                console.error("❌ 模型加载失败", e);
+                // 显示错误的具体类型和信息
+                resultBox.innerHTML = `❌ 模型加载失败<br>错误类型：${e?.name || "未知"}<br>错误信息：${e?.message || "undefined"}`;
+            }
+        })();
+
+        // 图片预览
+        document.getElementById('upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            preview.src = url;
+            preview.style.display = 'block';
+            resultBox.innerHTML = '';
+        });
+
+        // 识别
+        async function predict() {
+            if (!preview.src || preview.style.display === 'none') {
+                alert("请先上传图片！");
+                return;
+            }
+
+            if (!session) {
+                alert("模型尚未加载完成，请稍候再试");
+                return;
+            }
+
+            resultBox.innerHTML = "⏳ 识别中，请稍候...";
+
+            const img = new Image();
+            img.src = preview.src;
+            img.crossOrigin = "anonymous";
+            img.onload = async () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 224;
+                canvas.height = 224;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 224, 224);
+
+                const data = ctx.getImageData(0, 0, 224, 224).data;
+                const input = await preprocess(data);
+
+                const feeds = { input: input };
+                const output = await session.run(feeds);
+                const res = output.output.data;
+
+                showResult(res);
+            };
         }
-        const tensor=new ort.Tensor("float32",arr,[1,3,224,224]);
-        const res=await session.run({input:tensor});
-        const scores=res.output.data;
 
-        let maxIdx=0;
-        for(let i=0;i<scores.length;i++) if(scores[i]>scores[maxIdx]) maxIdx=i;
-        document.getElementById("result").innerText = "识别结果："+classNames[maxIdx];
-    };
-}
-</script>
+        // 预处理
+        function preprocess(data) {
+            const arr = new Float32Array(3 * 224 * 224);
+            const mean = [0.485, 0.456, 0.406];
+            const std = [0.229, 0.224, 0.225];
+
+            for (let i = 0; i < 224 * 224; i++) {
+                arr[i] = data[i * 4] / 255;
+                arr[i] = (arr[i] - mean[0]) / std[0];
+
+                arr[i + 224 * 224] = data[i * 4 + 1] / 255;
+                arr[i + 224 * 224] = (arr[i + 224 * 224] - mean[1]) / std[1];
+
+                arr[i + 2 * 224 * 224] = data[i * 4 + 2] / 255;
+                arr[i + 2 * 224 * 224] = (arr[i + 2 * 224 * 224] - mean[2]) / std[2];
+            }
+
+            return new ort.Tensor('float32', arr, [1, 3, 224, 224]);
+        }
+
+        // 显示结果
+        function showResult(scores) {
+            let maxIdx = 0;
+            let maxScore = 0;
+
+            for (let i = 0; i < scores.length; i++) {
+                if (scores[i] > maxScore) {
+                    maxScore = scores[i];
+                    maxIdx = i;
+                }
+            }
+
+            const expScores = scores.map(s => Math.exp(s));
+            const total = expScores.reduce((a, b) => a + b, 0);
+            const percent = (expScores[maxIdx] / total * 100).toFixed(2);
+
+            resultBox.innerHTML = `<b>识别结果：${classNames[maxIdx]}</b><br>置信度：${percent}%`;
+        }
+    </script>
 </body>
 </html>
