@@ -5,170 +5,168 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>花卉识别系统</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: Arial, sans-serif;
-        }
-        body {
-            background: #f5f5f5;
-            padding: 30px;
-            text-align: center;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-        #status {
-            margin: 15px 0;
-            color: #666;
-        }
-        #imagePreview {
-            max-width: 100%;
-            max-height: 300px;
-            margin: 20px 0;
-            border-radius: 8px;
-            display: none;
-        }
-        button {
-            padding: 10px 20px;
-            background: #4285f4;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            margin: 10px;
-        }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        #result {
-            margin-top: 20px;
-            font-size: 18px;
-            color: #222;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei", sans-serif; }
+        body { background: #f0f2f5; padding: 5vh 20px; text-align: center; }
+        .card { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h1 { color: #2d3748; margin-bottom: 8px; font-size: 24px; }
+        .tips { color: #718096; margin-bottom: 20px; font-size: 14px; }
+        #status { color: #e53e3e; margin: 15px 0; font-weight: bold; }
+        #imagePreview { max-width: 100%; max-height: 300px; margin: 20px auto; border-radius: 12px; display: none; border: 2px dashed #e2e8f0; }
+        .btn-group { margin: 20px 0; }
+        button { padding: 10px 25px; margin: 0 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; transition: all 0.3s; }
+        #predictBtn { background: #4299e1; color: white; }
+        #predictBtn:disabled { background: #a0aec0; cursor: not-allowed; }
+        #clearBtn { background: #ecc94b; color: #2d3748; }
+        #result { margin-top: 20px; padding: 15px; border-radius: 10px; background: #fdf2f8; color: #2d3748; font-size: 18px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>花卉识别系统（MobileNetV2）</h1>
-        <p id="status">加载模型中，请稍候...</p>
+    <div class="card">
+        <h1>花卉识别系统（MobileNetV2 + ONNX）</h1>
+        <div class="tips">纯前端部署，无需后端</div>
+        <div id="status">正在初始化模型...</div>
 
-        <input type="file" id="imageInput" accept="image/*" disabled>
-        <img id="imagePreview" alt="预览图">
+        <input type="file" id="imageInput" accept="image/*" disabled hidden />
+        <label for="imageInput" id="selectLabel" class="btn">选择图片</label>
+        <img id="imagePreview" alt="图片预览" />
 
-        <button id="predictBtn" disabled>开始识别</button>
+        <div class="btn-group">
+            <button id="predictBtn" disabled>开始识别</button>
+            <button id="clearBtn" onclick="clearAll()">清空</button>
+        </div>
+
         <div id="result"></div>
     </div>
 
-    <!-- CDN加速，解决加载失败 -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
+    <!-- 引入最小化的 ONNX 运行时库 -->
+    <script src="https://unpkg.com/onnxruntime-web@1.14.0/dist/ort.all.min.js"></script>
 
     <script>
         let session;
-        const status = document.getElementById('status');
-        const imageInput = document.getElementById('imageInput');
-        const predictBtn = document.getElementById('predictBtn');
-        const imagePreview = document.getElementById('imagePreview');
-        const resultDiv = document.getElementById('result');
+        let selectedFile = null;
 
-        // 花卉类别（你可以改成自己的30类）
-        const classNames = [
-            "雏菊","蒲公英","玫瑰","向日葵","郁金香","荷花","桂花","牡丹","杜鹃","山茶",
-            "茉莉","兰花","紫荆","紫薇","连翘","丁香","合欢","木槿","紫藤","凤仙",
-            "百合","水仙","鸢尾","飞燕草","虞美人","三色堇","牵牛花","石竹","满天星","绣球"
-        ];
-
-        // 加载模型（使用GitHub相对路径）
+        // 1. 强制使用最新的加载策略，绕过wasm路径问题
         async function loadModel() {
+            const status = document.getElementById('status');
+            const predictBtn = document.getElementById('predictBtn');
+            const imageInput = document.getElementById('imageInput');
+            const selectLabel = document.getElementById('selectLabel');
+
             try {
-                ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/";
-                session = await ort.InferenceSession.create("./flower_model.onnx", {
-                    executionProviders: ["wasm"],
-                    graphOptimizationLevel: "all"
+                status.textContent = "正在加载模型（约10秒）...";
+
+                // 关键修复：强制使用wasm后端，且不依赖外部路径
+                ort.env.wasm.numThreads = 1; // 降低线程数，避免浏览器卡死
+                ort.env.wasm.proxy = false;
+
+                // 直接创建Session，使用绝对路径
+                const modelUrl = "https://yanjushanzha.github.io/huahuishibie/flower_model.onnx";
+
+                session = await ort.InferenceSession.create(modelUrl, {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'basic' // 降低优化级别，提高兼容性
                 });
 
-                status.textContent = "模型加载完成！请选择图片";
-                imageInput.disabled = false;
+                status.textContent = "✅ 模型加载成功！请选择图片";
                 predictBtn.disabled = false;
+                imageInput.disabled = false;
+                selectLabel.style.opacity = 1;
+
             } catch (e) {
-                status.textContent = "模型加载失败，刷新重试：" + e.message;
-                console.error(e);
+                status.textContent = "❌ 加载失败：" + e.message;
+                status.style.color = "#e53e3e";
+                console.error("详细错误：", e);
+                // 失败后提供重试按钮
+                setTimeout(() => loadModel(), 3000);
             }
         }
 
-        // 图片预览
-        imageInput.onchange = () => {
-            const file = imageInput.files[0];
-            if (!file) return;
+        // 2. 图片选择与预览
+        document.getElementById('imageInput').addEventListener('change', (e) => {
+            selectedFile = e.target.files[0];
+            if (!selectedFile) return;
+
             const reader = new FileReader();
-            reader.onload = (e) => {
-                imagePreview.src = e.target.result;
-                imagePreview.style.display = "block";
+            reader.onload = (event) => {
+                const img = document.getElementById('imagePreview');
+                img.src = event.target.result;
+                img.style.display = 'block';
             };
-            reader.readAsDataURL(file);
-        };
+            reader.readAsDataURL(selectedFile);
+        });
 
-        // 识别
-        predictBtn.onclick = async () => {
-            if (!imageInput.files[0]) {
-                alert("请先选择图片");
-                return;
-            }
-            status.textContent = "识别中...";
-            try {
-                const img = await loadImage(imageInput.files[0]);
-                const tensor = preprocess(img);
-                const outputs = await session.run({ "input": tensor });
-                const predictions = Array.from(outputs.output.data);
-
-                let maxIdx = 0;
-                for (let i = 1; i < predictions.length; i++) {
-                    if (predictions[i] > predictions[maxIdx]) maxIdx = i;
-                }
-
-                resultDiv.textContent = `识别结果：${classNames[maxIdx]} （置信度：${(predictions[maxIdx]*100).toFixed(2)}%）`;
-            } catch (e) {
-                resultDiv.textContent = "识别失败：" + e.message;
-            }
-            status.textContent = "就绪";
-        };
-
-        // 图像预处理
-        function preprocess(img) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 224;
-            canvas.height = 224;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, 224, 224);
-
-            const data = ctx.getImageData(0,0,224,224).data;
-            const input = new Float32Array(1*3*224*224);
-
-            for (let i=0;i<224*224;i++) {
-                input[0*224*224 + i] = (data[i*4 + 0] / 255.0 - 0.485) / 0.229;
-                input[1*224*224 + i] = (data[i*4 + 1] / 255.0 - 0.456) / 0.224;
-                input[2*224*224 + i] = (data[i*4 + 2] / 255.0 - 0.406) / 0.225;
-            }
-            return new ort.Tensor('float32', input, [1,3,224,224]);
-        }
-
-        function loadImage(file) {
+        // 3. 图像预处理（必须和训练时完全一致）
+        function preprocessImage(file) {
             return new Promise((resolve) => {
                 const img = new Image();
-                img.onload = () => resolve(img);
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 224;
+                    canvas.height = 224;
+                    const ctx = canvas.getContext('2d');
+
+                    // 绘制图片并归一化
+                    ctx.drawImage(img, 0, 0, 224, 224);
+                    const imageData = ctx.getImageData(0, 0, 224, 224);
+                    const data = imageData.data;
+
+                    // 转换为 Float32Array，形状 [1, 3, 224, 224]
+                    const tensor = new Float32Array(1 * 3 * 224 * 224);
+                    for (let i = 0; i < 224 * 224; i++) {
+                        // RGB 通道，归一化到 [0,1] 后减均值除标准差
+                        tensor[i] = (data[i * 4] / 255.0 - 0.485) / 0.229;     // R
+                        tensor[i + 224 * 224] = (data[i * 4 + 1] / 255.0 - 0.456) / 0.224; // G
+                        tensor[i + 2 * 224 * 224] = (data[i * 4 + 2] / 255.0 - 0.406) / 0.225; // B
+                    }
+
+                    resolve(new ort.Tensor('float32', tensor, [1, 3, 224, 224]));
+                };
                 img.src = URL.createObjectURL(file);
             });
+        }
+
+        // 4. 识别逻辑
+        document.getElementById('predictBtn').addEventListener('click', async () => {
+            if (!selectedFile) {
+                alert("请先选择图片！");
+                return;
+            }
+
+            const status = document.getElementById('status');
+            const result = document.getElementById('result');
+            status.textContent = "识别中...";
+            result.textContent = "";
+
+            try {
+                const tensor = await preprocessImage(selectedFile);
+                const outputs = await session.run({ input: tensor });
+
+                // 假设输出是 [batch, num_classes]
+                const scores = Array.from(outputs[Object.keys(outputs)[0]].data);
+                const maxIndex = scores.indexOf(Math.max(...scores));
+                const confidence = (Math.max(...scores) * 100).toFixed(2);
+
+                const classNames = [
+                    "芙蓉葵","鸡蛋花","金鱼草","蒲公英","牵牛花", "石竹","仙客来","一品红",
+                    "硬叶兜兰","玉兰", "月季","白晶菊","波斯菊","大丽花","帝王花", "杜鹃",
+                    "非洲菊","风信子","荷花","鹤望兰", "凌霄花","马蹄莲","三角梅","三色堇",
+                    "水仙", "睡莲","向日葵","银莲花","虞美人","鸢尾"
+                ];
+
+                result.textContent = `识别结果：${classNames[maxIndex]} | 置信度：${confidence}%`;
+                status.textContent = "识别完成";
+            } catch (e) {
+                result.textContent = "识别失败：" + e.message;
+                console.error(e);
+            }
+        });
+
+        // 5. 清空功能
+        function clearAll() {
+            document.getElementById('imagePreview').style.display = 'none';
+            document.getElementById('imageInput').value = '';
+            document.getElementById('result').textContent = '';
+            selectedFile = null;
         }
 
         // 启动
