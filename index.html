@@ -113,28 +113,26 @@
         const preview = document.getElementById('preview');
         const resultBox = document.getElementById('result');
 
-        // 配置跨域 + 正确路径（GitHub Pages 100% 可用）
+        // 1. 必须先配置ORT环境，再加载模型
         ort.env.wasm = {
             proxy: true,
-            numThreads: 4
+            numThreads: 1,
+            wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/"
         };
-        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/";
 
-        // 加载模型（修复路径 + 跨域）
+        // 2. 加载模型（固定CDN地址，带错误详情）
         (async () => {
-    try {
-        // 直接写死你自己的CDN地址，避免任何相对路径问题
-        const modelUrl = "https://yanjushanzha.github.io/huahuishibie/flower_model.onnx";
-        console.log("正在加载模型：", modelUrl);
-        session = await ort.InferenceSession.create(modelUrl);
-        console.log("✅ 模型加载成功");
-        resultBox.innerHTML = "✅ 模型已就绪，可上传图片识别";
-    } catch (e) {
-        // 把完整错误信息显示在页面上，方便排查
-        console.error("❌ 模型加载失败", e);
-        resultBox.innerHTML = `❌ 模型加载失败<br>错误详情：${e.message}<br>请检查模型文件是否正常`;
-    }
-})();
+            try {
+                const modelUrl = "https://yanjushanzha.github.io/huahuishibie/flower_model.onnx";
+                console.log("正在加载模型：", modelUrl);
+                session = await ort.InferenceSession.create(modelUrl);
+                console.log("✅ 模型加载成功");
+                resultBox.innerHTML = "✅ 模型已就绪，可上传图片识别";
+            } catch (e) {
+                console.error("❌ 模型加载失败", e);
+                resultBox.innerHTML = `❌ 模型加载失败<br>错误详情：${e.message}<br>请检查模型文件是否正常`;
+            }
+        })();
 
         // 图片预览
         document.getElementById('upload').addEventListener('change', (e) => {
